@@ -1,0 +1,8 @@
+PrintShelf — Free for personal use
+
+Copyright (c) 2026 Scott French / French Solutions, LLC
+
+Personal / hobby use is free.
+Commercial / business use requires written permission: scott@frenchsolutionsllc.com
+
+Full terms: see LICENSE in the project folder, or About (i) in the app.

@@ -1,0 +1,92 @@
+{
+  "name": "printshelf",
+  "version": "0.1.0",
+  "description": "Local STL & 3MF library browser with Bambu-style previews",
+  "main": "electron/main.js",
+  "author": "Scott French / French Solutions, LLC",
+  "license": "SEE LICENSE IN LICENSE",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1 --port 5173\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "build": "vite build",
+    "start": "electron .",
+    "pack": "vite build && electron-builder --mac --dir",
+    "dist": "vite build && electron-builder --mac dmg && electron-builder --win portable zip --x64",
+    "dist:mac": "vite build && electron-builder --mac dmg",
+    "dist:win": "vite build && electron-builder --win portable zip --x64"
+  },
+  "build": {
+    "appId": "com.printshelf.app",
+    "productName": "PrintShelf",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.graphics-design",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "title": "PrintShelf",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "PrintShelf-${version}-win-${arch}.${ext}"
+    }
+  },
+  "dependencies": {
+    "jszip": "^3.10.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.170.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "linkedom": "^0.18.13",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3",
+    "wait-on": "^8.0.1"
+  }
+}

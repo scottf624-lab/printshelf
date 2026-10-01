@@ -1,0 +1,15 @@
+PrintShelf — first launch (unsigned build)
+
+macOS
+-----
+1. Open the DMG and drag PrintShelf to Applications.
+2. Control-click (right-click) PrintShelf → Open.
+3. Click Open in the dialog.
+   (Or: System Settings → Privacy & Security → Open Anyway)
+
+Windows
+-------
+1. Run PrintShelf-0.1.0-win-x64.exe (or unzip the .zip and run PrintShelf.exe).
+2. If SmartScreen appears: More info → Run anyway.
+
+After the first approval, the app opens normally.
