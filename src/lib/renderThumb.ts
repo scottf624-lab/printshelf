@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { extract3mfThumbDataUrl, load3mfObject } from './threemf'
+import { svgBufferToDataUrl } from './svgPreview'
 
 const SIZE = 320
 
@@ -58,6 +59,10 @@ async function renderObjectThumb(object: THREE.Object3D): Promise<string> {
 }
 
 export async function renderModelThumb(buffer: ArrayBuffer, ext: string): Promise<string> {
+  if (ext === 'svg') {
+    return svgBufferToDataUrl(buffer)
+  }
+
   if (ext === '3mf') {
     const embedded = await extract3mfThumbDataUrl(buffer)
     if (embedded) return embedded

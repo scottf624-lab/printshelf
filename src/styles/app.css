@@ -252,51 +252,24 @@ button, input {
   line-height: 1.5;
 }
 
-
-.about-btn {
-  border: 1px solid var(--border);
-  background: transparent;
-  border-radius: 999px;
-  width: 32px;
-  height: 32px;
-  cursor: pointer;
-  color: var(--muted);
-  font-weight: 700;
-}
-.about-btn:hover { color: var(--text); border-color: #3d4b66; }
-
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.55);
+.svg-viewer {
   display: grid;
   place-items: center;
-  z-index: 50;
   padding: 24px;
+  background:
+    linear-gradient(45deg, #12161e 25%, transparent 25%),
+    linear-gradient(-45deg, #12161e 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #12161e 75%),
+    linear-gradient(-45deg, transparent 75%, #12161e 75%);
+  background-size: 24px 24px;
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  background-color: #0c0e12;
 }
-.modal {
-  width: min(520px, 100%);
-  max-height: min(80vh, 640px);
-  overflow: auto;
-  background: #161a22;
-  border: 1px solid var(--border);
-  border-radius: 16px;
+.svg-preview {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  background: #fff;
+  border-radius: 12px;
   box-shadow: var(--shadow);
-  padding: 20px 22px;
 }
-.modal h2 { margin: 0 0 6px; font-size: 20px; }
-.modal .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
-.modal pre {
-  white-space: pre-wrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.45;
-  background: #0f1115;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px;
-  color: #c9d2e3;
-  max-height: 360px;
-  overflow: auto;
-}
-.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
