@@ -9,7 +9,7 @@ export default function App() {
   const [root, setRoot] = useState('')
   const [models, setModels] = useState<ModelInfo[]>([])
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<'all' | 'stl' | '3mf'>('all')
+  const [filter, setFilter] = useState<'all' | 'stl' | '3mf' | 'svg'>('all')
   const [selected, setSelected] = useState<ModelInfo | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState('')
@@ -92,12 +92,13 @@ export default function App() {
         <select
           className="btn"
           value={filter}
-          onChange={(e) => setFilter(e.target.value as 'all' | 'stl' | '3mf')}
+          onChange={(e) => setFilter(e.target.value as 'all' | 'stl' | '3mf' | 'svg')}
           style={{ paddingRight: 28 }}
         >
           <option value="all">All types</option>
           <option value="stl">STL</option>
           <option value="3mf">3MF</option>
+          <option value="svg">SVG</option>
         </select>
         <div className="meta">
           {status === 'ready'
@@ -132,7 +133,7 @@ export default function App() {
         <div className="status">
           <h2>Can’t open that folder</h2>
           <p className="error">{error}</p>
-          <p className="empty-hint">Pick the folder that holds your STL and 3MF files.</p>
+          <p className="empty-hint">Pick the folder that holds your STL, 3MF, and SVG files.</p>
           <button className="btn primary" onClick={pickFolder}>Choose folder</button>
         </div>
       )}
