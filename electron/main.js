@@ -7,7 +7,7 @@ const { pathToFileURL } = require('url')
 
 const isDev = !app.isPackaged
 const DEFAULT_LIBRARY = '/Volumes/Crucial X9/3D Prints'
-const MODEL_EXTS = new Set(['.stl', '.3mf'])
+const MODEL_EXTS = new Set(['.stl', '.3mf', '.svg'])
 
 nativeTheme.themeSource = 'dark'
 
