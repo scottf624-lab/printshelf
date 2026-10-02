@@ -6,9 +6,13 @@ contextBridge.exposeInMainWorld('printshelf', {
   scan: (root) => ipcRenderer.invoke('library:scan', root),
   readFile: (filePath) => ipcRenderer.invoke('library:readFile', filePath),
   fileUrl: (filePath) => ipcRenderer.invoke('library:fileUrl', filePath),
+  deleteFile: (filePath) => ipcRenderer.invoke('library:deleteFile', filePath),
   getThumbPath: (modelId) => ipcRenderer.invoke('thumbs:getPath', modelId),
   saveThumb: (modelId, dataUrl) => ipcRenderer.invoke('thumbs:save', modelId, dataUrl),
   cacheDir: () => ipcRenderer.invoke('thumbs:cacheDir'),
   showInFolder: (filePath) => ipcRenderer.invoke('shell:showItem', filePath),
   openPath: (filePath) => ipcRenderer.invoke('shell:openPath', filePath),
+  getVersion: () => ipcRenderer.invoke('app:getVersion'),
+  checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
+  openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
 })

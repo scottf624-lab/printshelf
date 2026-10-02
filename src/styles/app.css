@@ -273,3 +273,98 @@ button, input {
   border-radius: 12px;
   box-shadow: var(--shadow);
 }
+
+
+.btn.danger {
+  color: var(--danger);
+  border-color: rgba(251, 113, 133, 0.45);
+  background: rgba(251, 113, 133, 0.08);
+}
+.btn.danger:hover {
+  background: rgba(251, 113, 133, 0.18);
+  border-color: rgba(251, 113, 133, 0.7);
+}
+
+.about-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.about-btn:hover {
+  color: var(--text);
+  border-color: #3d4b66;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(4, 6, 10, 0.72);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  backdrop-filter: blur(6px);
+}
+.modal {
+  width: min(560px, 100%);
+  max-height: min(80vh, 720px);
+  overflow: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 22px 22px 16px;
+  display: grid;
+  gap: 12px;
+}
+.modal h2 { margin: 0; font-size: 20px; }
+.modal .sub { color: var(--muted); font-size: 13px; }
+.modal pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  background: #0c0e12;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  max-height: 320px;
+  overflow: auto;
+}
+.modal pre.notes { max-height: 220px; color: var(--text); }
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+.update-modal { width: min(480px, 100%); }
+
+.toast {
+  position: fixed;
+  top: 68px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+.error-toast {
+  color: var(--danger);
+  border-color: rgba(251, 113, 133, 0.45);
+}

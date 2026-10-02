@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ModelInfo } from './vite-env'
+import type { ModelInfo, UpdateCheckResult } from './vite-env'
 import { ModelCard } from './components/ModelCard'
 import { ModelViewer } from './components/ModelViewer'
 import { formatBytes } from './lib/format'
@@ -15,7 +15,19 @@ export default function App() {
   const [error, setError] = useState('')
   const [visible, setVisible] = useState<Set<string>>(new Set())
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [appVersion, setAppVersion] = useState('…')
+  const [updateOpen, setUpdateOpen] = useState(false)
+  const [updateBusy, setUpdateBusy] = useState(false)
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null)
+  const [actionError, setActionError] = useState('')
   const observerRef = useRef<IntersectionObserver | null>(null)
+  const actionErrorTimer = useRef<number | null>(null)
+
+  const flashError = useCallback((msg: string) => {
+    setActionError(msg)
+    if (actionErrorTimer.current) window.clearTimeout(actionErrorTimer.current)
+    actionErrorTimer.current = window.setTimeout(() => setActionError(''), 4000)
+  }, [])
 
   const scan = useCallback(async (folder?: string) => {
     setStatus('loading')
@@ -36,6 +48,12 @@ export default function App() {
 
   useEffect(() => {
     ;(async () => {
+      try {
+        const v = await window.printshelf.getVersion()
+        setAppVersion(v)
+      } catch {
+        setAppVersion('0.1.1')
+      }
       const def = await window.printshelf.defaultPath()
       setRoot(def)
       await scan(def)
@@ -76,6 +94,47 @@ export default function App() {
     if (folder) await scan(folder)
   }
 
+  async function deleteSelected() {
+    if (!selected) return
+    const name = selected.name
+    const ok = window.confirm(`Permanently delete ${name} from disk? This cannot be undone.`)
+    if (!ok) return
+    const id = selected.id
+    const path = selected.path
+    const result = await window.printshelf.deleteFile(path)
+    if (!result.ok) {
+      flashError(result.error || 'Delete failed')
+      return
+    }
+    setModels((prev) => prev.filter((m) => m.id !== id))
+    setSelected((cur) => (cur?.id === id ? null : cur))
+  }
+
+  async function checkUpdates() {
+    setUpdateOpen(true)
+    setUpdateBusy(true)
+    setUpdateInfo(null)
+    try {
+      const result = await window.printshelf.checkForUpdates()
+      setUpdateInfo(result)
+      if (result.current) setAppVersion(result.current)
+    } catch (err) {
+      setUpdateInfo({
+        ok: false,
+        current: appVersion,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setUpdateBusy(false)
+    }
+  }
+
+  const notesSnippet = useMemo(() => {
+    const notes = updateInfo?.notes?.trim()
+    if (!notes) return ''
+    return notes.length > 600 ? `${notes.slice(0, 600)}…` : notes
+  }, [updateInfo])
+
   return (
     <div className="app">
       <header className="titlebar">
@@ -109,18 +168,77 @@ export default function App() {
         </div>
         <button className="btn" onClick={() => scan(root)}>Refresh</button>
         <button className="btn primary" onClick={pickFolder}>Choose folder</button>
+        <button className="btn" onClick={checkUpdates}>Updates</button>
         <button className="about-btn" title="About & license" onClick={() => setAboutOpen(true)}>i</button>
       </header>
+
+      {actionError && <div className="toast error-toast">{actionError}</div>}
 
       {aboutOpen && (
         <div className="modal-backdrop" onClick={() => setAboutOpen(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>PrintShelf</h2>
-            <div className="sub">v0.1.1 · Free for personal use · © 2026 French Solutions, LLC</div>
+            <div className="sub">v{appVersion} · Free for personal use · © 2026 French Solutions, LLC</div>
             <pre>{LICENSE_TEXT}</pre>
             <div className="modal-actions">
               <button className="btn" onClick={() => setAboutOpen(false)}>Close</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {updateOpen && (
+        <div className="modal-backdrop" onClick={() => !updateBusy && setUpdateOpen(false)}>
+          <div className="modal update-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Check for updates</h2>
+            {updateBusy && <p className="empty-hint">Checking GitHub Releases…</p>}
+            {!updateBusy && updateInfo && !updateInfo.ok && (
+              <>
+                <p className="error">{updateInfo.error || 'Update check failed'}</p>
+                <div className="sub">Current version: v{updateInfo.current || appVersion}</div>
+                <div className="modal-actions">
+                  <button className="btn" onClick={() => setUpdateOpen(false)}>Close</button>
+                </div>
+              </>
+            )}
+            {!updateBusy && updateInfo?.ok && !updateInfo.newer && (
+              <>
+                <p>You’re on v{updateInfo.current}</p>
+                <div className="sub">Latest release is also v{updateInfo.latest}.</div>
+                <div className="modal-actions">
+                  {updateInfo.htmlUrl && (
+                    <button className="btn" onClick={() => window.printshelf.openExternal(updateInfo.htmlUrl!)}>
+                      Release page
+                    </button>
+                  )}
+                  <button className="btn" onClick={() => setUpdateOpen(false)}>Close</button>
+                </div>
+              </>
+            )}
+            {!updateBusy && updateInfo?.ok && updateInfo.newer && (
+              <>
+                <p>
+                  <strong>v{updateInfo.latest}</strong> is available (you have v{updateInfo.current}).
+                </p>
+                {notesSnippet ? <pre className="notes">{notesSnippet}</pre> : null}
+                <div className="modal-actions">
+                  {updateInfo.downloadUrl && (
+                    <button
+                      className="btn primary"
+                      onClick={() => window.printshelf.openExternal(updateInfo.downloadUrl!)}
+                    >
+                      Download
+                    </button>
+                  )}
+                  {updateInfo.htmlUrl && (
+                    <button className="btn" onClick={() => window.printshelf.openExternal(updateInfo.htmlUrl!)}>
+                      Release page
+                    </button>
+                  )}
+                  <button className="btn" onClick={() => setUpdateOpen(false)}>Close</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -179,6 +297,7 @@ export default function App() {
                   <div className="detail-actions">
                     <button className="btn primary" onClick={() => window.printshelf.openPath(selected.path)}>Open file</button>
                     <button className="btn" onClick={() => window.printshelf.showInFolder(selected.path)}>Show in Finder</button>
+                    <button className="btn danger" onClick={deleteSelected}>Delete</button>
                   </div>
                 </>
               ) : (

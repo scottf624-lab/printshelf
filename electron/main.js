@@ -175,3 +175,129 @@ ipcMain.handle('shell:showItem', (_e, filePath) => {
 })
 
 ipcMain.handle('shell:openPath', (_e, filePath) => shell.openPath(filePath))
+
+function resolveUnderLibrary(filePath) {
+  if (typeof filePath !== 'string' || !filePath) return null
+  const root = path.resolve(getLibraryPath())
+  const resolved = path.resolve(filePath)
+  const rel = path.relative(root, resolved)
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null
+  return resolved
+}
+
+function parseSemver(v) {
+  const parts = String(v || '').replace(/^v/i, '').split(/[.+-]/).map((n) => parseInt(n, 10))
+  return [parts[0] || 0, parts[1] || 0, parts[2] || 0]
+}
+
+function isNewerVersion(latest, current) {
+  const a = parseSemver(latest)
+  const b = parseSemver(current)
+  for (let i = 0; i < 3; i++) {
+    if (a[i] > b[i]) return true
+    if (a[i] < b[i]) return false
+  }
+  return false
+}
+
+function pickReleaseAsset(assets) {
+  if (!Array.isArray(assets) || !assets.length) return null
+  const names = assets.map((a) => ({ a, name: String(a.name || '').toLowerCase() }))
+  if (process.platform === 'darwin') {
+    const dmgs = names.filter((x) => x.name.endsWith('.dmg'))
+    if (!dmgs.length) return null
+    const preferArm = process.arch === 'arm64'
+    const ranked = dmgs.slice().sort((x, y) => {
+      const score = (n) => {
+        let s = 0
+        if (preferArm && /arm64|aarch64|apple.?silicon/.test(n)) s += 4
+        if (!preferArm && /x64|amd64|intel/.test(n)) s += 4
+        if (/universal/.test(n)) s += 2
+        return s
+      }
+      return score(y.name) - score(x.name)
+    })
+    return ranked[0].a
+  }
+  if (process.platform === 'win32') {
+    const exes = names.filter((x) => x.name.endsWith('.exe'))
+    const preferred = exes.find((x) => /win.?x64|x64|portable/.test(x.name)) || exes[0]
+    return preferred ? preferred.a : null
+  }
+  return null
+}
+
+ipcMain.handle('library:deleteFile', async (_e, filePath) => {
+  try {
+    const resolved = resolveUnderLibrary(filePath)
+    if (!resolved) return { ok: false, error: 'Path is outside the library folder' }
+    let st
+    try {
+      st = await fsp.stat(resolved)
+    } catch {
+      return { ok: false, error: 'File not found' }
+    }
+    if (!st.isFile()) return { ok: false, error: 'Not a regular file' }
+    await fsp.unlink(resolved)
+    const thumb = path.join(cacheDir(), `${hashPath(resolved)}.png`)
+    try {
+      if (fs.existsSync(thumb)) await fsp.unlink(thumb)
+    } catch {
+      // ignore thumb cleanup failures
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) }
+  }
+})
+
+ipcMain.handle('app:getVersion', () => app.getVersion())
+
+ipcMain.handle('app:checkForUpdates', async () => {
+  const current = app.getVersion()
+  try {
+    const res = await fetch('https://api.github.com/repos/scottf624-lab/printshelf/releases/latest', {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': `PrintShelf/${current}`,
+      },
+    })
+    if (!res.ok) {
+      return { ok: false, current, error: `GitHub API ${res.status}` }
+    }
+    const data = await res.json()
+    const tag = String(data.tag_name || data.name || '').trim()
+    const latest = tag.replace(/^v/i, '')
+    if (!latest) return { ok: false, current, error: 'No release tag found' }
+    const newer = isNewerVersion(latest, current)
+    const asset = pickReleaseAsset(data.assets || [])
+    return {
+      ok: true,
+      current,
+      latest,
+      newer,
+      notes: typeof data.body === 'string' ? data.body : '',
+      downloadUrl: asset && asset.browser_download_url ? asset.browser_download_url : null,
+      htmlUrl: data.html_url || `https://github.com/scottf624-lab/printshelf/releases/latest`,
+    }
+  } catch (err) {
+    return { ok: false, current, error: err && err.message ? err.message : String(err) }
+  }
+})
+
+ipcMain.handle('app:openExternal', async (_e, url) => {
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
+    return { ok: false, error: 'Only http(s) URLs are allowed' }
+  }
+  let parsed
+  try {
+    parsed = new URL(url)
+  } catch {
+    return { ok: false, error: 'Invalid URL' }
+  }
+  if (parsed.hostname !== 'github.com' && parsed.hostname !== 'www.github.com' && !parsed.hostname.endsWith('.github.com')) {
+    return { ok: false, error: 'Only github.com URLs are allowed' }
+  }
+  await shell.openExternal(url)
+  return { ok: true }
+})
