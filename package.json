@@ -1,6 +1,6 @@
 {
   "name": "printshelf",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Local STL & 3MF library browser with Bambu-style previews",
   "main": "electron/main.js",
   "author": "Scott French / French Solutions, LLC",
