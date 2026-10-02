@@ -11,6 +11,30 @@ const MODEL_EXTS = new Set(['.stl', '.3mf', '.svg'])
 
 nativeTheme.themeSource = 'dark'
 
+function settingsPath() {
+  return path.join(app.getPath('userData'), 'settings.json')
+}
+
+function loadSettings() {
+  try {
+    return JSON.parse(fs.readFileSync(settingsPath(), 'utf8'))
+  } catch {
+    return {}
+  }
+}
+
+function saveSettings(partial) {
+  const next = { ...loadSettings(), ...partial }
+  fs.mkdirSync(path.dirname(settingsPath()), { recursive: true })
+  fs.writeFileSync(settingsPath(), JSON.stringify(next, null, 2))
+}
+
+function getLibraryPath() {
+  const saved = loadSettings().libraryPath
+  if (typeof saved === 'string' && saved && fs.existsSync(saved)) return saved
+  return DEFAULT_LIBRARY
+}
+
 function cacheDir() {
   return path.join(app.getPath('userData'), 'thumb-cache')
 }
@@ -99,21 +123,24 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-ipcMain.handle('library:defaultPath', () => DEFAULT_LIBRARY)
+ipcMain.handle('library:defaultPath', () => getLibraryPath())
 
 ipcMain.handle('library:pickFolder', async () => {
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory'],
-    defaultPath: DEFAULT_LIBRARY,
+    defaultPath: getLibraryPath(),
   })
   if (result.canceled || !result.filePaths[0]) return null
-  return result.filePaths[0]
+  const folder = result.filePaths[0]
+  saveSettings({ libraryPath: folder })
+  return folder
 })
 
 ipcMain.handle('library:scan', async (_e, root) => {
-  const folder = root || DEFAULT_LIBRARY
+  const folder = root || getLibraryPath()
   const exists = fs.existsSync(folder)
   if (!exists) return { ok: false, error: `Folder not found: ${folder}`, models: [], root: folder }
+  saveSettings({ libraryPath: folder })
   const models = await walkModels(folder)
   return { ok: true, models, root: folder, count: models.length }
 })
