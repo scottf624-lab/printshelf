@@ -116,7 +116,7 @@ export default function App() {
         <div className="modal-backdrop" onClick={() => setAboutOpen(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>PrintShelf</h2>
-            <div className="sub">v0.1.0 · Free for personal use · © 2026 French Solutions, LLC</div>
+            <div className="sub">v0.1.1 · Free for personal use · © 2026 French Solutions, LLC</div>
             <pre>{LICENSE_TEXT}</pre>
             <div className="modal-actions">
               <button className="btn" onClick={() => setAboutOpen(false)}>Close</button>
