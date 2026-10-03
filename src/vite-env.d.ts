@@ -16,11 +16,36 @@ export type ScanResult = {
   models: ModelInfo[]
   root: string
   count?: number
+  notes?: Record<string, NoteEntry>
 }
 
 export type DeleteResult = {
   ok: boolean
   error?: string
+}
+
+export type PrintStatus = '' | 'to-print' | 'printed' | 'reprint' | 'failed'
+
+export type NoteEntry = {
+  status: PrintStatus
+  note: string
+  updatedAt?: number
+}
+
+export type RenameResult = {
+  ok: boolean
+  error?: string
+  path?: string
+  name?: string
+  relative?: string
+  id?: string
+}
+
+export type NotesSetResult = {
+  ok: boolean
+  error?: string
+  status?: PrintStatus
+  note?: string
 }
 
 export type UpdateCheckResult = {
@@ -41,6 +66,10 @@ export type PrintShelfAPI = {
   readFile: (filePath: string) => Promise<ArrayBuffer>
   fileUrl: (filePath: string) => Promise<string>
   deleteFile: (filePath: string) => Promise<DeleteResult>
+  renameFile: (oldPath: string, newName: string) => Promise<RenameResult>
+  notesGet: (filePath: string) => Promise<NoteEntry>
+  notesSet: (filePath: string, entry: { status: PrintStatus; note: string }) => Promise<NotesSetResult>
+  notesMap: () => Promise<Record<string, NoteEntry>>
   getThumbPath: (modelId: string) => Promise<string | null>
   saveThumb: (modelId: string, dataUrl: string) => Promise<string>
   cacheDir: () => Promise<string>

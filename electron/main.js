@@ -3,6 +3,7 @@ const path = require('path')
 const fs = require('fs')
 const fsp = require('fs/promises')
 const crypto = require('crypto')
+const { NOTE_STATUSES, normalizeRel, sanitizeEntry, migrateLegacyMap, matchNotes } = require('./noteMatch')
 const { pathToFileURL } = require('url')
 
 const isDev = !app.isPackaged
@@ -139,10 +140,11 @@ ipcMain.handle('library:pickFolder', async () => {
 ipcMain.handle('library:scan', async (_e, root) => {
   const folder = root || getLibraryPath()
   const exists = fs.existsSync(folder)
-  if (!exists) return { ok: false, error: `Folder not found: ${folder}`, models: [], root: folder }
+  if (!exists) return { ok: false, error: `Folder not found: ${folder}`, models: [], root: folder, notes: {} }
   saveSettings({ libraryPath: folder })
   const models = await walkModels(folder)
-  return { ok: true, models, root: folder, count: models.length }
+  const notes = await withNotesLock(() => resolveLibraryNotes(folder, models))
+  return { ok: true, models, root: folder, count: models.length, notes }
 })
 
 ipcMain.handle('library:readFile', async (_e, filePath) => {
@@ -175,6 +177,185 @@ ipcMain.handle('shell:showItem', (_e, filePath) => {
 })
 
 ipcMain.handle('shell:openPath', (_e, filePath) => shell.openPath(filePath))
+
+
+let notesQueue = Promise.resolve()
+
+function withNotesLock(fn) {
+  const run = notesQueue.then(fn, fn)
+  notesQueue = run.then(() => {}, () => {})
+  return run
+}
+
+function notesFilePath() {
+  return path.join(app.getPath('userData'), 'notes.json')
+}
+
+function notesLibraryRoot() {
+  const saved = loadSettings().libraryPath
+  if (typeof saved === 'string' && saved.trim()) return saved
+  return DEFAULT_LIBRARY
+}
+
+function relativeToLibrary(root, filePath) {
+  if (typeof root !== 'string' || !root || typeof filePath !== 'string' || !filePath) return null
+  const rel = path.relative(path.resolve(root), path.resolve(filePath))
+  const normal = normalizeRel(rel.split(path.sep).join('/'))
+  return normal || null
+}
+
+function hashFile(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256')
+    const stream = fs.createReadStream(filePath)
+    stream.on('error', reject)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('end', () => resolve(hash.digest('hex')))
+  })
+}
+
+function loadNotesStore() {
+  const file = notesFilePath()
+  let raw
+  try {
+    raw = JSON.parse(fs.readFileSync(file, 'utf8'))
+  } catch (err) {
+    return []
+  }
+  if (raw && raw.version === 2 && Array.isArray(raw.entries)) {
+    return raw.entries.map(sanitizeEntry).filter(Boolean)
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
+  const root = notesLibraryRoot()
+  const sizes = {}
+  for (const key of Object.keys(raw)) {
+    if (!path.isAbsolute(key)) continue
+    const abs = path.resolve(key)
+    try {
+      const st = fs.statSync(abs)
+      if (st.isFile()) sizes[abs] = st.size
+    } catch {
+      // missing file: keep the note, leave size and hash empty
+    }
+  }
+  const entries = migrateLegacyMap(raw, root, sizes).map(sanitizeEntry).filter(Boolean)
+  saveNotesStore(entries)
+  return entries
+}
+
+function saveNotesStore(entries) {
+  const clean = []
+  for (const entry of entries) {
+    const sanitized = sanitizeEntry(entry)
+    if (sanitized) clean.push(sanitized)
+  }
+  fs.mkdirSync(path.dirname(notesFilePath()), { recursive: true })
+  fs.writeFileSync(notesFilePath(), JSON.stringify({ version: 2, entries: clean }, null, 2))
+}
+
+function noteRow(entry) {
+  const row = { status: entry.status, note: entry.note }
+  if (typeof entry.updatedAt === 'number') row.updatedAt = entry.updatedAt
+  return row
+}
+
+async function resolveLibraryNotes(root, models) {
+  const entries = loadNotesStore()
+  const files = models.map((model) => ({
+    relative: relativeToLibrary(root, model.path) || normalizeRel(model.relative),
+    size: model.size,
+    hash: null,
+    path: model.path,
+  }))
+  let result = matchNotes(files, entries)
+  if (result.filesToHash.length) {
+    for (const index of result.filesToHash) {
+      if (files[index].hash) continue
+      try {
+        files[index].hash = await hashFile(files[index].path)
+      } catch {
+        files[index].hash = null
+      }
+    }
+    result = matchNotes(files, entries)
+  }
+  if (result.changed) saveNotesStore(result.notes)
+  const byPath = {}
+  for (const attachment of result.attachments) {
+    const model = models[attachment.fileIndex]
+    const entry = result.notes[attachment.noteIndex]
+    if (!model || !entry) continue
+    byPath[model.path] = noteRow(entry)
+  }
+  return byPath
+}
+
+function findNoteIndex(entries, relative, size, hash) {
+  const byPath = []
+  entries.forEach((entry, index) => {
+    if (entry.relative === relative && entry.size === size) byPath.push(index)
+  })
+  if (byPath.length >= 1) return byPath[0]
+  if (!hash) return -1
+  const byHash = []
+  entries.forEach((entry, index) => {
+    if (entry.hash && entry.hash === hash && entry.size === size) byHash.push(index)
+  })
+  if (byHash.length === 1) return byHash[0]
+  return -1
+}
+
+function rekeyNote(oldPath, newPath) {
+  const root = path.resolve(getLibraryPath())
+  const oldRel = relativeToLibrary(root, oldPath)
+  const newRel = relativeToLibrary(root, newPath)
+  if (!oldRel || !newRel || oldRel === newRel) return
+  let size = null
+  try {
+    const st = fs.statSync(newPath)
+    if (!st.isFile()) return
+    size = st.size
+  } catch {
+    return
+  }
+  const entries = loadNotesStore().map((entry) => ({ ...entry }))
+  const sized = []
+  const sameRel = []
+  entries.forEach((entry, index) => {
+    if (entry.relative !== oldRel) return
+    sameRel.push(index)
+    if (entry.size === size) sized.push(index)
+  })
+  let index = -1
+  if (sized.length === 1) index = sized[0]
+  else if (!sized.length && sameRel.length === 1) index = sameRel[0]
+  if (index < 0) return
+  const entry = entries[index]
+  entry.relative = newRel
+  if (typeof entry.size !== 'number') entry.size = size
+  saveNotesStore(entries)
+}
+
+function sanitizeFileName(currentName, newName) {
+  if (typeof newName !== 'string') return { error: 'Invalid file name' }
+  let name = newName.trim()
+  if (!name) return { error: 'Name cannot be empty' }
+  if (name === '.' || name === '..') return { error: 'Invalid file name' }
+  if (name.includes('/') || name.includes('\\') || name.includes('\0')) {
+    return { error: 'Name cannot include a path' }
+  }
+  const origExt = path.extname(currentName || '')
+  const newExt = path.extname(name)
+  if (!newExt || newExt === '.') {
+    name = name.replace(/\.+$/, '')
+    if (origExt) name += origExt
+  }
+  if (!name || name === '.' || name === '..') return { error: 'Invalid file name' }
+  if (name.includes('/') || name.includes('\\') || name.includes('\0')) {
+    return { error: 'Name cannot include a path' }
+  }
+  return { name }
+}
 
 function resolveUnderLibrary(filePath) {
   if (typeof filePath !== 'string' || !filePath) return null
@@ -238,7 +419,11 @@ ipcMain.handle('library:deleteFile', async (_e, filePath) => {
       return { ok: false, error: 'File not found' }
     }
     if (!st.isFile()) return { ok: false, error: 'Not a regular file' }
-    await fsp.unlink(resolved)
+    try {
+      await shell.trashItem(resolved)
+    } catch (err) {
+      return { ok: false, error: err && err.message ? err.message : String(err) }
+    }
     const thumb = path.join(cacheDir(), `${hashPath(resolved)}.png`)
     try {
       if (fs.existsSync(thumb)) await fsp.unlink(thumb)
@@ -250,6 +435,153 @@ ipcMain.handle('library:deleteFile', async (_e, filePath) => {
     return { ok: false, error: err && err.message ? err.message : String(err) }
   }
 })
+
+
+ipcMain.handle('library:renameFile', (_e, oldPath, newName) => withNotesLock(async () => {
+  try {
+    const resolvedOld = resolveUnderLibrary(oldPath)
+    if (!resolvedOld) return { ok: false, error: 'Path is outside the library folder' }
+    let st
+    try {
+      st = await fsp.stat(resolvedOld)
+    } catch {
+      return { ok: false, error: 'File not found' }
+    }
+    if (!st.isFile()) return { ok: false, error: 'Not a regular file' }
+
+    const sanitized = sanitizeFileName(path.basename(resolvedOld), newName)
+    if (sanitized.error) return { ok: false, error: sanitized.error }
+
+    const libraryRoot = path.resolve(getLibraryPath())
+    const newPath = path.join(path.dirname(resolvedOld), sanitized.name)
+    const resolvedNew = resolveUnderLibrary(newPath)
+    if (!resolvedNew) return { ok: false, error: 'Path is outside the library folder' }
+
+    if (fs.existsSync(resolvedNew)) {
+      let same = false
+      try {
+        const dest = await fsp.stat(resolvedNew)
+        same = dest.ino === st.ino && dest.dev === st.dev
+      } catch {
+        same = false
+      }
+      if (!same) return { ok: false, error: 'A file with that name already exists' }
+    }
+
+    if (resolvedOld !== resolvedNew) {
+      await fsp.rename(resolvedOld, resolvedNew)
+      try {
+        rekeyNote(resolvedOld, resolvedNew)
+      } catch {
+        // rename already happened
+      }
+      const oldThumb = path.join(cacheDir(), `${hashPath(resolvedOld)}.png`)
+      const newThumb = path.join(cacheDir(), `${hashPath(resolvedNew)}.png`)
+      if (oldThumb !== newThumb && fs.existsSync(oldThumb)) {
+        try {
+          await fsp.copyFile(oldThumb, newThumb)
+          await fsp.unlink(oldThumb)
+        } catch {
+          // ignore thumb move failures
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      path: resolvedNew,
+      name: path.basename(resolvedNew),
+      relative: path.relative(libraryRoot, resolvedNew),
+      id: hashPath(resolvedNew),
+    }
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) }
+  }
+}))
+
+ipcMain.handle('notes:get', (_e, filePath) => withNotesLock(async () => {
+  const resolved = resolveUnderLibrary(filePath)
+  if (!resolved) return { status: '', note: '' }
+  let st
+  try {
+    st = await fsp.stat(resolved)
+  } catch {
+    return { status: '', note: '' }
+  }
+  if (!st.isFile()) return { status: '', note: '' }
+  const relative = relativeToLibrary(getLibraryPath(), resolved)
+  if (!relative) return { status: '', note: '' }
+  const entries = loadNotesStore().map((entry) => ({ ...entry }))
+  const index = findNoteIndex(entries, relative, st.size, null)
+  if (index < 0) return { status: '', note: '' }
+  const entry = entries[index]
+  if (!entry.hash) {
+    try {
+      entry.hash = await hashFile(resolved)
+      saveNotesStore(entries)
+    } catch {
+      // leave the hash empty until the next save or scan
+    }
+  }
+  return { status: entry.status, note: entry.note }
+}))
+
+ipcMain.handle('notes:set', (_e, filePath, payload) => withNotesLock(async () => {
+  try {
+    const resolved = resolveUnderLibrary(filePath)
+    if (!resolved) return { ok: false, error: 'Path is outside the library folder' }
+    if (!payload || typeof payload !== 'object') return { ok: false, error: 'Invalid notes' }
+    if (!NOTE_STATUSES.has(payload.status)) return { ok: false, error: 'Invalid status' }
+    if (typeof payload.note !== 'string') return { ok: false, error: 'Invalid note' }
+    const status = payload.status
+    const note = payload.note
+    let st
+    try {
+      st = await fsp.stat(resolved)
+    } catch {
+      return { ok: false, error: 'File not found' }
+    }
+    if (!st.isFile()) return { ok: false, error: 'Not a regular file' }
+    const relative = relativeToLibrary(getLibraryPath(), resolved)
+    if (!relative) return { ok: false, error: 'Path is outside the library folder' }
+    let hash
+    try {
+      hash = await hashFile(resolved)
+    } catch (err) {
+      return { ok: false, error: err && err.message ? err.message : String(err) }
+    }
+    const entries = loadNotesStore().map((entry) => ({ ...entry }))
+    const index = findNoteIndex(entries, relative, st.size, hash)
+    if (!status && !note.trim()) {
+      if (index >= 0) {
+        entries.splice(index, 1)
+        saveNotesStore(entries)
+      }
+      return { ok: true, status, note }
+    }
+    const record = {
+      relative,
+      size: st.size,
+      hash,
+      status,
+      note,
+      updatedAt: Date.now(),
+    }
+    if (index >= 0) entries[index] = record
+    else entries.push(record)
+    saveNotesStore(entries)
+    return { ok: true, status, note }
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) }
+  }
+}))
+
+ipcMain.handle('notes:map', () => withNotesLock(async () => {
+  const root = getLibraryPath()
+  if (!fs.existsSync(root)) return {}
+  const models = await walkModels(root)
+  return resolveLibraryNotes(root, models)
+}))
 
 ipcMain.handle('app:getVersion', () => app.getVersion())
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ModelInfo, UpdateCheckResult } from './vite-env'
+import type { ModelInfo, NoteEntry, PrintStatus, UpdateCheckResult } from './vite-env'
 import { ModelCard } from './components/ModelCard'
 import { ModelViewer } from './components/ModelViewer'
 import { formatBytes } from './lib/format'
@@ -20,8 +20,17 @@ export default function App() {
   const [updateBusy, setUpdateBusy] = useState(false)
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null)
   const [actionError, setActionError] = useState('')
+  const [notesMap, setNotesMap] = useState<Record<string, NoteEntry>>({})
+  const [printStatus, setPrintStatus] = useState<PrintStatus>('')
+  const [noteDraft, setNoteDraft] = useState('')
+  const [noteSaved, setNoteSaved] = useState(false)
   const observerRef = useRef<IntersectionObserver | null>(null)
   const actionErrorTimer = useRef<number | null>(null)
+  const savedTimer = useRef<number | null>(null)
+  const draftRef = useRef<{ path: string; status: PrintStatus; note: string }>({ path: '', status: '', note: '' })
+  const saveChain = useRef<Promise<void>>(Promise.resolve())
+  const notesMapRef = useRef(notesMap)
+  notesMapRef.current = notesMap
 
   const flashError = useCallback((msg: string) => {
     setActionError(msg)
@@ -43,6 +52,7 @@ export default function App() {
     }
     setRoot(result.root)
     setModels(result.models)
+    setNotesMap(result.notes || {})
     setStatus('ready')
   }, [])
 
@@ -59,6 +69,54 @@ export default function App() {
       await scan(def)
     })()
   }, [scan])
+
+  useEffect(() => {
+    const path = selected?.path || ''
+    const entry = path ? notesMapRef.current[path] : undefined
+    const status = (entry?.status || '') as PrintStatus
+    const note = entry?.note || ''
+    draftRef.current = { path, status, note }
+    setPrintStatus(status)
+    setNoteDraft(note)
+    setNoteSaved(false)
+    // notesMap is read for the newly selected file only. Later saves update draftRef themselves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.path])
+
+  function markSaved() {
+    setNoteSaved(true)
+    if (savedTimer.current) window.clearTimeout(savedTimer.current)
+    savedTimer.current = window.setTimeout(() => setNoteSaved(false), 1600)
+  }
+
+  function persistNotes(partial: { status?: PrintStatus; note?: string }, unchangedOk = false) {
+    const job = saveChain.current.then(async () => {
+      const cur = draftRef.current
+      if (!cur.path) return
+      const next = {
+        path: cur.path,
+        status: partial.status !== undefined ? partial.status : cur.status,
+        note: partial.note !== undefined ? partial.note : cur.note,
+      }
+      if (unchangedOk && next.status === cur.status && next.note === cur.note) return
+      const result = await window.printshelf.notesSet(next.path, { status: next.status, note: next.note })
+      if (!result.ok) {
+        flashError(result.error || 'Could not save notes')
+        return
+      }
+      if (draftRef.current.path === next.path) {
+        setPrintStatus(draftRef.current.status)
+      }
+      setNotesMap((prev) => {
+        const copy = { ...prev }
+        if (!next.status && !next.note.trim()) delete copy[next.path]
+        else copy[next.path] = { status: next.status, note: next.note }
+        return copy
+      })
+      markSaved()
+    })
+    saveChain.current = job.catch(() => {})
+  }
 
   useEffect(() => {
     observerRef.current = new IntersectionObserver(
@@ -97,7 +155,7 @@ export default function App() {
   async function deleteSelected() {
     if (!selected) return
     const name = selected.name
-    const ok = window.confirm(`Permanently delete ${name} from disk? This cannot be undone.`)
+    const ok = window.confirm(`Move ${name} to the Trash on Mac or the Recycle Bin on Windows? The note stays with the file if you put it back.`)
     if (!ok) return
     const id = selected.id
     const path = selected.path
@@ -108,6 +166,42 @@ export default function App() {
     }
     setModels((prev) => prev.filter((m) => m.id !== id))
     setSelected((cur) => (cur?.id === id ? null : cur))
+  }
+
+  async function renameSelected() {
+    if (!selected) return
+    const input = window.prompt('Rename file', selected.name)
+    if (input === null) return
+    const trimmed = input.trim()
+    if (!trimmed || trimmed === '.' || trimmed === '..' || trimmed.includes('/') || trimmed.includes('\\')) {
+      flashError('Invalid file name')
+      return
+    }
+    const current = selected
+    const result = await window.printshelf.renameFile(current.path, trimmed)
+    if (!result.ok || !result.path || !result.name || !result.relative || !result.id) {
+      flashError(result.error || 'Rename failed')
+      return
+    }
+    const dot = result.name.lastIndexOf('.')
+    const ext = dot > 0 ? result.name.slice(dot + 1).toLowerCase() : current.ext
+    const updated: ModelInfo = {
+      ...current,
+      id: result.id,
+      name: result.name,
+      path: result.path,
+      relative: result.relative,
+      ext,
+    }
+    setModels((prev) => prev.map((m) => (m.id === current.id || m.path === current.path ? updated : m)))
+    setSelected((cur) => (cur && (cur.id === current.id || cur.path === current.path) ? updated : cur))
+    setNotesMap((prev) => {
+      if (current.path === updated.path || !prev[current.path]) return prev
+      const copy = { ...prev }
+      copy[updated.path] = copy[current.path]
+      delete copy[current.path]
+      return copy
+    })
   }
 
   async function checkUpdates() {
@@ -279,6 +373,7 @@ export default function App() {
                       selected={selected?.id === m.id}
                       onSelect={() => setSelected(m)}
                       priority={visible.has(m.id) || i < 24}
+                      printStatus={notesMap[m.path]?.status || ''}
                     />
                   </div>
                 ))}
@@ -294,9 +389,49 @@ export default function App() {
                   <div className="detail-row"><span>Type</span><strong>{selected.ext.toUpperCase()}</strong></div>
                   <div className="detail-row"><span>Size</span><strong>{formatBytes(selected.size)}</strong></div>
                   <div className="detail-row"><span>Path</span><strong style={{ textAlign: 'right', maxWidth: '65%' }}>{selected.relative}</strong></div>
+                  <div className="detail-field">
+                    <label>
+                      Status
+                      {noteSaved && <span className="saved-hint">Saved</span>}
+                    </label>
+                    <select
+                      className="btn status-select"
+                      value={printStatus}
+                      onChange={(e) => {
+                        const status = e.target.value as PrintStatus
+                        setPrintStatus(status)
+                        draftRef.current = { ...draftRef.current, status }
+                        void persistNotes({ status })
+                      }}
+                    >
+                      <option value="">No status</option>
+                      <option value="to-print">To print</option>
+                      <option value="printed">Printed</option>
+                      <option value="reprint">Reprint</option>
+                      <option value="failed">Failed</option>
+                    </select>
+                  </div>
+                  <div className="detail-field">
+                    <label>Notes</label>
+                    <textarea
+                      className="note-box"
+                      value={noteDraft}
+                      placeholder="Print notes…"
+                      onChange={(e) => {
+                        const note = e.target.value
+                        setNoteDraft(note)
+                        draftRef.current = { ...draftRef.current, note }
+                        setNoteSaved(false)
+                      }}
+                      onBlur={() => {
+                        void persistNotes({ note: draftRef.current.note }, true)
+                      }}
+                    />
+                  </div>
                   <div className="detail-actions">
                     <button className="btn primary" onClick={() => window.printshelf.openPath(selected.path)}>Open file</button>
                     <button className="btn" onClick={() => window.printshelf.showInFolder(selected.path)}>Show in Finder</button>
+                    <button className="btn" onClick={renameSelected}>Rename</button>
                     <button className="btn danger" onClick={deleteSelected}>Delete</button>
                   </div>
                 </>

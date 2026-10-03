@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { ModelInfo } from '../vite-env'
+import type { ModelInfo, PrintStatus } from '../vite-env'
 import { formatBytes } from '../lib/format'
 import { renderModelThumb } from '../lib/renderThumb'
 
@@ -8,9 +8,17 @@ type Props = {
   selected: boolean
   onSelect: () => void
   priority: boolean
+  printStatus?: PrintStatus
 }
 
-export function ModelCard({ model, selected, onSelect, priority }: Props) {
+const STATUS_LABEL: Record<Exclude<PrintStatus, ''>, string> = {
+  'to-print': 'To print',
+  printed: 'Printed',
+  reprint: 'Reprint',
+  failed: 'Failed',
+}
+
+export function ModelCard({ model, selected, onSelect, priority, printStatus = '' }: Props) {
   const [src, setSrc] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -51,6 +59,7 @@ export function ModelCard({ model, selected, onSelect, priority }: Props) {
       <div className="thumb">
         {src ? <img src={src} alt="" loading="lazy" /> : loading ? <div className="spinner" /> : failed ? <span style={{ color: '#fb7185', fontSize: 12 }}>Failed</span> : <div className="spinner" style={{ opacity: 0.35 }} />}
         <span className="badge">{model.ext}</span>
+        {printStatus ? <span className={`status-badge ${printStatus}`}>{STATUS_LABEL[printStatus]}</span> : null}
       </div>
       <div className="card-body">
         <div className="card-title">{model.name}</div>
